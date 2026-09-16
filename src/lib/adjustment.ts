@@ -145,20 +145,33 @@ export function maxAbsResidualDD(result: AdjustmentResult): DD {
 }
 
 /**
- * 并列容差：DD 下求解/相减噪声为 O(εdd·操作数量级)，εdd≈2^-104。
- * 取 64 个该单位；操作数为亚正常值时容差下溢为 0，零不与极小非零并列。
+ * 并列容差：DD 求解/相减的舍入噪声为 O(m·2^-104·操作数尺度)
+ * （Householder 每列累积 O(m) 个 DD 运算；实测 m=3、高差 1e9 时噪声
+ * 约 2.6e-23，与一个 εdd·尺度吻合）。系数取 8(m+1) 给出数十倍裕量，
+ * 又远小于任何物理上可分辨的残差差异（1e9 尺度下容差约 3e-21）；
+ * 操作数为亚正常值（如 5e-324）时尺度为 0，容差为 0，零不与非零并列。
  */
 export function residualTieToleranceDD(result: AdjustmentResult): number {
   let scale = 0;
   for (const o of result.observations) {
     scale = Math.max(scale, Math.abs(o.adjustedDh) + Math.abs(o.dh));
   }
+  const m = result.observations.length;
   const EPS_DD = Math.pow(2, -104);
-  return 64 * EPS_DD * scale;
+  return 8 * (m + 1) * EPS_DD * scale;
 }
 
-/** 是否与最大未舍入残差并列（均为 DD 值）。 */
+/**
+ * 是否与最大未舍入残差并列（均为 DD 值）。
+ * 规则：
+ *  - 最大 |v| 不超过求解噪声容差时，所有残差在数值上都与零不可区分，
+ *    不存在“最大残差”，一律不标红（避免相容网中的精确零残差被染色）；
+ *  - 否则仅标出与最大值之差不超过容差者（容纳不同减法路径的 DD 噪声，
+ *    但零与真实的非零小残差不会并列）。
+ */
 export function isTiedMaxResidualDD(residual: DD, maxAbs: DD, tol: number): boolean {
+  if (dd.cmp(maxAbs, Z) === 0) return false;
+  if (dd.cmp(maxAbs, dd.fromNumber(tol)) <= 0) return false;
   const diff = dd.toNumber(dd.sub(dd.abs(residual), maxAbs));
   if (tol === 0) return diff === 0;
   return Math.abs(diff) <= tol;

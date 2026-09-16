@@ -218,9 +218,34 @@ describe('加权最小二乘平差', () => {
     expect(isTiedMaxResidualDD(dd.fromNumber(0.001), mx, tol)).toBe(false);
   });
 
-  it('十亿级高差下数学并列的残差仍判定并列（DD 消除 double 路径噪声）', () => {
-    // A=0、C=2e9 为基准，B 未知；两条链观测完全对称（各偏 0.001），
-    // 直达观测闭合。数学上 v1=v2；double 下二者曾相差 2.38e-7。
+  it('十亿级高差下完全相容网（残差即 DD 噪声）一条都不标红', () => {
+    // A=0、C=2e9 为基准，B 未知；观测严格相容，数学残差全为 0。
+    seq = 0;
+    const { points, observations } = validateAll(
+      [
+        point('A', 'benchmark', '0'),
+        point('B', 'unknown'),
+        point('C', 'benchmark', '2000000000'),
+      ],
+      [
+        obs('A', 'B', '1000000000', '1'),
+        obs('B', 'C', '1000000000', '1'),
+        obs('A', 'C', '2000000000', '1'),
+      ],
+    );
+    const r = adjust(points, observations);
+    // DD 残差仅为 ~1e-23 的求解噪声，远小于 double 可显示量级
+    for (const o of r.observations) expect(Math.abs(o.residual)).toBeLessThan(1e-20);
+    const mx = maxAbsResidualDD(r);
+    const tol = residualTieToleranceDD(r);
+    // 最大残差不超过噪声容差 → 不存在“最大残差”，零残差不被染色
+    for (const o of r.observations) {
+      expect(isTiedMaxResidualDD(o.residualDD, mx, tol)).toBe(false);
+    }
+  });
+
+  it('十亿级高差下真实并列的残差（远超噪声）仍同时标红', () => {
+    // 闭合差 0.002 三等权分配：v1=v2=v3≈-…/6.67e-4，三条数学上并列
     seq = 0;
     const { points, observations } = validateAll(
       [
@@ -235,14 +260,12 @@ describe('加权最小二乘平差', () => {
       ],
     );
     const r = adjust(points, observations);
-    const v1 = r.observations[0].residual;
-    const v2 = r.observations[1].residual;
-    // DD 下两条残差路径差异应在 1e-20 量级（而非 double 的 2.4e-7）
-    expect(Math.abs(v1 - v2)).toBeLessThan(1e-18);
     const mx = maxAbsResidualDD(r);
     const tol = residualTieToleranceDD(r);
-    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(true);
-    expect(isTiedMaxResidualDD(r.observations[1].residualDD, mx, tol)).toBe(true);
+    expect(dd.toNumber(mx)).toBeGreaterThan(1e-6);
+    const ties = r.observations.map((o) => isTiedMaxResidualDD(o.residualDD, mx, tol));
+    // 两条链残差并列 -0.001；直达观测两端皆基准，v3 恒为 0，不参与标红
+    expect(ties).toEqual([true, true, false]);
   });
 
   it('十亿级高差下残差“略有差别”时只标出较大者', () => {
