@@ -388,7 +388,7 @@ test.describe('隧道复测统一平差工作台', () => {
     await expect(rows.nth(1).locator('.residual-cell')).toHaveText('0.000');
   });
 
-  test('十亿级高差、残差差异极小（显示同为 0.000）时只标红最大一条；相容时不标红', async ({ page }) => {
+  test('十亿级高差、残差差异极小（显示同为 0.000）时只标红最大一条；相容时零残差并列标红', async ({ page }) => {
     await page.getByRole('button', { name: '清空全部' }).click();
     await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 3 });
     await page.getByRole('button', { name: '＋ 空观测行' }).click({ clickCount: 3 });
@@ -413,21 +413,25 @@ test.describe('隧道复测统一平差工作台', () => {
     await fillObs(3, 'A', 'C', '2000000000', '1');
 
     const rows = page.getByTestId('obs-results').locator('tbody tr');
-    // 完全相容：残差仅为 1e-23 量级求解噪声，不存在最大残差，一条都不标红
-    await expect(
-      page.getByTestId('obs-results').locator('tbody tr.residual-max'),
-    ).toHaveCount(0);
+    const maxRowsLocator = () =>
+      page.getByTestId('obs-results').locator('tbody tr.residual-max');
+    // 完全相容：残差恰为 0（内部噪声 ~1e-54），所有零残差并列最大，全部标红
+    await expect(maxRowsLocator()).toHaveCount(3);
 
-    // 加入 1e-14 的真实矛盾（十进制精确读入；等权 1:2 时两条链残差约 -2e-15、-8e-15）
+    // 加入 1e-14 的真实矛盾（十进制精确读入；权 1:1/4 时两条链残差约 -2e-15、-8e-15）
     await page.getByLabel('第 1 行高差').fill('1000000000.00000000000001');
     await expect(rows).toHaveCount(3);
-    const maxRows = page.getByTestId('obs-results').locator('tbody tr.residual-max');
-    await expect(maxRows).toHaveCount(1); // 零残差与较小残差都不标红
+    await expect(maxRowsLocator()).toHaveCount(1); // 零残差与较小残差都不标红
+    const maxRows = maxRowsLocator();
     await expect(maxRows.nth(0)).toContainText('B'); // 最大残差在第 2 行（B→C）
     await expect(maxRows.nth(0)).toContainText('C');
     for (let i = 0; i < 3; i++) {
       await expect(rows.nth(i).locator('.residual-cell')).toHaveText('0.000');
     }
+
+    // 恢复相容后零残差重新并列标红
+    await page.getByLabel('第 1 行高差').fill('1000000000');
+    await expect(maxRowsLocator()).toHaveCount(3);
   });
 
   test('拓扑缩放按钮改变视图，复位还原', async ({ page }) => {

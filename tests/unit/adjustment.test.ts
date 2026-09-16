@@ -218,7 +218,7 @@ describe('加权最小二乘平差', () => {
     expect(isTiedMaxResidualDD(dd.fromNumber(0.001), mx, tol)).toBe(false);
   });
 
-  it('十亿级高差下完全相容网（残差即 DD 噪声）一条都不标红', () => {
+  it('十亿级高差下完全相容网：残差（仅 1e-54 级噪声）彼此并列，全部标红', () => {
     // A=0、C=2e9 为基准，B 未知；观测严格相容，数学残差全为 0。
     seq = 0;
     const { points, observations } = validateAll(
@@ -234,14 +234,28 @@ describe('加权最小二乘平差', () => {
       ],
     );
     const r = adjust(points, observations);
-    // DD 残差仅为 ~1e-23 的求解噪声，远小于 double 可显示量级
-    for (const o of r.observations) expect(Math.abs(o.residual)).toBeLessThan(1e-20);
+    // 迭代改进后残差噪声在 εdd²≈1e-62 量级（远小于 double 可显示量级）
+    for (const o of r.observations) expect(Math.abs(o.residual)).toBeLessThan(1e-40);
     const mx = maxAbsResidualDD(r);
     const tol = residualTieToleranceDD(r);
-    // 最大残差不超过噪声容差 → 不存在“最大残差”，零残差不被染色
+    // 全部残差与零不可区分 → 它们并列最大，全部标红（与单条零残差同理）
     for (const o of r.observations) {
-      expect(isTiedMaxResidualDD(o.residualDD, mx, tol)).toBe(false);
+      expect(isTiedMaxResidualDD(o.residualDD, mx, tol)).toBe(true);
     }
+  });
+
+  it('单条完全相容（残差恰为 0）观测即最大残差，应标红', () => {
+    seq = 0;
+    const { points, observations } = validateAll(
+      [point('A', 'benchmark', '0.3'), point('B', 'benchmark', '0.6')],
+      [obs('A', 'B', '0.3')],
+    );
+    const r = adjust(points, observations);
+    expect(r.observations[0].residual).toBe(0);
+    const mx = maxAbsResidualDD(r);
+    const tol = residualTieToleranceDD(r);
+    expect(dd.toNumber(mx)).toBe(0);
+    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(true);
   });
 
   it('十亿级高差下真实并列的残差（远超噪声）仍同时标红', () => {
@@ -266,6 +280,35 @@ describe('加权最小二乘平差', () => {
     const ties = r.observations.map((o) => isTiedMaxResidualDD(o.residualDD, mx, tol));
     // 两条链残差并列 -0.001；直达观测两端皆基准，v3 恒为 0，不参与标红
     expect(ties).toEqual([true, true, false]);
+  });
+
+  it('十亿级高差下两条极小残差不相等时只标红较大者', () => {
+    // σ1=1、σ2=2，闭合差 d=1e-15 精确给出（十进制读入）。
+    // v1+v2=-d；极小化 v1²+0.25·v2² 得 v1=-0.2d=-2e-16，v2=-0.8d=-8e-16，v3=0。
+    seq = 0;
+    const { points, observations } = validateAll(
+      [
+        point('A', 'benchmark', '0'),
+        point('B', 'unknown'),
+        point('C', 'benchmark', '2000000000'),
+      ],
+      [
+        obs('A', 'B', '1000000000', '1'),
+        obs('B', 'C', '1000000000.000000000000001', '2'), // d=1e-15
+        obs('A', 'C', '2000000000', '1'),
+      ],
+    );
+    const r = adjust(points, observations);
+    const d = 1e-15;
+    expect(r.observations[0].residual).toBeCloseTo(-0.2 * d, 17);
+    expect(r.observations[1].residual).toBeCloseTo(-0.8 * d, 17);
+    expect(r.observations[2].residual).toBe(0);
+    const mx = maxAbsResidualDD(r);
+    const tol = residualTieToleranceDD(r);
+    expect(tol).toBeLessThan(1e-20); // 容差 ~8e-22，远小于残差差 6e-16
+    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(false);
+    expect(isTiedMaxResidualDD(r.observations[1].residualDD, mx, tol)).toBe(true);
+    expect(isTiedMaxResidualDD(r.observations[2].residualDD, mx, tol)).toBe(false);
   });
 
   it('十亿级高差下残差“略有差别”时只标出较大者', () => {

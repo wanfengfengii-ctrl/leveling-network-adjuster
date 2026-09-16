@@ -136,3 +136,23 @@ export function solveRSTDD(qr: PivotedQRD, b: DD[]): DD[] {
   for (let k = 0; k < n; k++) x[perm[k]] = z[k];
   return x;
 }
+
+/**
+ * 带迭代改进的最小二乘解（同一组 QR，不重新分解）：
+ * 反复以 R̃ δ = Qᵀ(b−Ax) 修正 x，把随观测数 m 累积的前向误差
+ * 从 O(m·εdd) 压回 O(εdd)，使并列残差比较可用很紧的容差。
+ */
+export function solveRefinedDD(qr: PivotedQRD, A: DD[][], b: DD[], iterations = 2): DD[] {
+  const x = solveRSTDD(qr, b);
+  for (let it = 0; it < iterations; it++) {
+    // r = b − A x
+    const r: DD[] = b.map((bi, i) => {
+      let s: DD = bi;
+      for (let j = 0; j < A[i].length; j++) s = dd.sub(s, dd.mul(A[i][j], x[j]));
+      return s;
+    });
+    const delta = solveRSTDD(qr, r);
+    for (let j = 0; j < x.length; j++) x[j] = dd.add(x[j], delta[j]);
+  }
+  return x;
+}
