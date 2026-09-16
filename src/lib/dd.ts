@@ -149,10 +149,28 @@ export function parseDecimal(raw: string): DD | null {
   for (const ch of digits) {
     v = add(mul(v, ten), [ch.charCodeAt(0) - 48, 0]);
   }
-  if (exp >= 0) {
-    for (let i = 0; i < exp; i++) v = mul(v, ten);
-  } else {
-    for (let i = 0; i < -exp; i++) v = div(v, ten);
+  if (exp !== 0) {
+    const k = Math.abs(exp);
+    // 构造 10^k（DD）：k≤102 时精确（5^k<2^211，两个 double 可容纳），
+    // 更大时相对误差约 k·εdd。最终只做一次乘除，避免连除相对误差线性累积。
+    let p10: DD = one;
+    let factorFinite = true;
+    for (let i = 0; i < k; i++) {
+      p10 = mul(p10, ten);
+      if (!Number.isFinite(p10[0])) {
+        factorFinite = false;
+        break;
+      }
+    }
+    if (factorFinite) {
+      v = exp > 0 ? mul(v, p10) : div(v, p10);
+    } else if (exp < 0) {
+      // 结果落在亚正常区间（如 5e-324），因子 10^k 超出 double：
+      // 逐次除以 10；DD 除法第三项修正 (r0+r1)/b 可承载 hi=0、lo 存值的情形。
+      for (let i = 0; i < k; i++) v = div(v, ten);
+    } else {
+      return null; // 超出 double 上限（等价 Infinity），视为非法
+    }
   }
   return neg ? negate(v) : v;
 }

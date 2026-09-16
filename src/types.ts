@@ -83,6 +83,8 @@ export interface ObservationResult {
   residual: number;
   /** 未舍入残差（double-double，用于并列判定） */
   residualDD: DD;
+  /** 是否与全网最大未舍入 |v| 并列（在平差层按各行数值噪声界判定） */
+  maxTied: boolean;
   /** 加权残差平方 (v/σ)²（先除后平方） */
   weightedSquaredResidual: number;
 }

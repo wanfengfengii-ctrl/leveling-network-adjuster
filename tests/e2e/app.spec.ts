@@ -418,10 +418,11 @@ test.describe('隧道复测统一平差工作台', () => {
     // 完全相容：残差恰为 0（内部噪声 ~1e-54），所有零残差并列最大，全部标红
     await expect(maxRowsLocator()).toHaveCount(3);
 
-    // 加入 1e-14 的真实矛盾（十进制精确读入；权 1:1/4 时两条链残差约 -2e-15、-8e-15）
-    await page.getByLabel('第 1 行高差').fill('1000000000.00000000000001');
+    // 闭合差 1e-21（21 位小数，十进制精确读入）加在 B→C（σ=2）：
+    // 两条链残差约 -2e-22、-8e-22，三位小数都显示 0.000，但只有较大的第 2 条标红
+    await page.getByLabel('第 2 行高差').fill('1000000000.000000000000000000001');
     await expect(rows).toHaveCount(3);
-    await expect(maxRowsLocator()).toHaveCount(1); // 零残差与较小残差都不标红
+    await expect(maxRowsLocator()).toHaveCount(1);
     const maxRows = maxRowsLocator();
     await expect(maxRows.nth(0)).toContainText('B'); // 最大残差在第 2 行（B→C）
     await expect(maxRows.nth(0)).toContainText('C');
@@ -430,7 +431,7 @@ test.describe('隧道复测统一平差工作台', () => {
     }
 
     // 恢复相容后零残差重新并列标红
-    await page.getByLabel('第 1 行高差').fill('1000000000');
+    await page.getByLabel('第 2 行高差').fill('1000000000');
     await expect(maxRowsLocator()).toHaveCount(3);
   });
 

@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-  adjust,
-  isTiedMaxResidualDD,
-  maxAbsResidualDD,
-  residualTieToleranceDD,
-} from '../../src/lib/adjustment';
+import { adjust, maxAbsResidualDD } from '../../src/lib/adjustment';
 import { validateAll } from '../../src/lib/validation';
 import * as dd from '../../src/lib/dd';
-import type { AdjustmentResult, ObservationRow, PointRow } from '../../src/types';
+import type { ObservationRow, PointRow } from '../../src/types';
 
 let seq = 0;
 const pid = () => `p${seq++}`;
@@ -135,12 +130,9 @@ describe('加权最小二乘平差', () => {
     const r = adjust(points, observations);
     expect(r.observations[0].residual).toBe(0);
     expect(r.observations[1].residual).toBe(5e-324);
-    const mx = maxAbsResidualDD(r);
-    expect(dd.toNumber(mx)).toBe(5e-324);
-    const tol = residualTieToleranceDD(r);
-    expect(tol).toBe(0); // 操作数为亚正常量级，容差下溢为 0
-    expect(isTiedMaxResidualDD(dd.fromNumber(0), mx, tol)).toBe(false);
-    expect(isTiedMaxResidualDD(dd.fromNumber(5e-324), mx, tol)).toBe(true);
+    expect(dd.toNumber(maxAbsResidualDD(r))).toBe(5e-324);
+    expect(r.observations[0].maxTied).toBe(false);
+    expect(r.observations[1].maxTied).toBe(true);
   });
 
   it('观测少于未知量也判秩亏', () => {
@@ -197,27 +189,6 @@ describe('加权最小二乘平差', () => {
     expect(Number.isFinite(r.elevations[1])).toBe(true);
   });
 
-  it('并列判定基于 DD 未舍入残差：常规真并列成立、零与非零不并列', () => {
-    const mkResult = (residuals: number[]): AdjustmentResult => ({
-      elevations: [],
-      observations: residuals.map((v) => ({
-        from: 'a', end: 'b', dh: 0, sigma: 1, adjustedDh: v,
-        residual: v, residualDD: dd.fromNumber(v), weightedSquaredResidual: v * v,
-      })),
-      weightedSumOfSquares: 0,
-      unknownCount: 0,
-      rankDeficient: false,
-    });
-
-    const r = mkResult([0.002, -0.002, 0.001]);
-    const mx = maxAbsResidualDD(r);
-    expect(dd.toNumber(mx)).toBeCloseTo(0.002, 15);
-    const tol = residualTieToleranceDD(r);
-    expect(isTiedMaxResidualDD(dd.fromNumber(0.002), mx, tol)).toBe(true);
-    expect(isTiedMaxResidualDD(dd.fromNumber(-0.002), mx, tol)).toBe(true);
-    expect(isTiedMaxResidualDD(dd.fromNumber(0.001), mx, tol)).toBe(false);
-  });
-
   it('十亿级高差下完全相容网：残差（仅 1e-54 级噪声）彼此并列，全部标红', () => {
     // A=0、C=2e9 为基准，B 未知；观测严格相容，数学残差全为 0。
     seq = 0;
@@ -236,12 +207,8 @@ describe('加权最小二乘平差', () => {
     const r = adjust(points, observations);
     // 迭代改进后残差噪声在 εdd²≈1e-62 量级（远小于 double 可显示量级）
     for (const o of r.observations) expect(Math.abs(o.residual)).toBeLessThan(1e-40);
-    const mx = maxAbsResidualDD(r);
-    const tol = residualTieToleranceDD(r);
     // 全部残差与零不可区分 → 它们并列最大，全部标红（与单条零残差同理）
-    for (const o of r.observations) {
-      expect(isTiedMaxResidualDD(o.residualDD, mx, tol)).toBe(true);
-    }
+    expect(r.observations.map((o) => o.maxTied)).toEqual([true, true, true]);
   });
 
   it('单条完全相容（残差恰为 0）观测即最大残差，应标红', () => {
@@ -252,10 +219,8 @@ describe('加权最小二乘平差', () => {
     );
     const r = adjust(points, observations);
     expect(r.observations[0].residual).toBe(0);
-    const mx = maxAbsResidualDD(r);
-    const tol = residualTieToleranceDD(r);
-    expect(dd.toNumber(mx)).toBe(0);
-    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(true);
+    expect(dd.toNumber(maxAbsResidualDD(r))).toBe(0);
+    expect(r.observations[0].maxTied).toBe(true);
   });
 
   it('十亿级高差下真实并列的残差（远超噪声）仍同时标红', () => {
@@ -274,12 +239,35 @@ describe('加权最小二乘平差', () => {
       ],
     );
     const r = adjust(points, observations);
-    const mx = maxAbsResidualDD(r);
-    const tol = residualTieToleranceDD(r);
-    expect(dd.toNumber(mx)).toBeGreaterThan(1e-6);
-    const ties = r.observations.map((o) => isTiedMaxResidualDD(o.residualDD, mx, tol));
+    expect(dd.toNumber(maxAbsResidualDD(r))).toBeGreaterThan(1e-6);
     // 两条链残差并列 -0.001；直达观测两端皆基准，v3 恒为 0，不参与标红
-    expect(ties).toEqual([true, true, false]);
+    expect(r.observations.map((o) => o.maxTied)).toEqual([true, true, false]);
+  });
+
+  it('十亿级高差下闭合差 1e-21：只标红绝对残差最大的一条', () => {
+    // σ1=1、σ2=2，闭合差 d=1e-21 精确给出（十进制读入）。
+    // v1=-0.2d=-2e-22，v2=-0.8d=-8e-22，v3=0；三条三位小数都显示 0.000。
+    seq = 0;
+    const { points, observations } = validateAll(
+      [
+        point('A', 'benchmark', '0'),
+        point('B', 'unknown'),
+        point('C', 'benchmark', '2000000000'),
+      ],
+      [
+        obs('A', 'B', '1000000000', '1'),
+        obs('B', 'C', '1000000000.000000000000000000001', '2'), // d=1e-21（21 位小数）
+        obs('A', 'C', '2000000000', '1'),
+      ],
+    );
+    const r = adjust(points, observations);
+    const d = 1e-21;
+    const relErr = (got: number, want: number) => Math.abs(got - want) / Math.abs(want);
+    expect(relErr(r.observations[0].residual, -0.2 * d)).toBeLessThan(1e-14);
+    expect(relErr(r.observations[1].residual, -0.8 * d)).toBeLessThan(1e-14);
+    expect(r.observations[2].residual).toBe(0);
+    // 容差按每行操作数：第二条约 4·εdd·1e9≈8e-23，远小于 |v2−v1|=6e-22
+    expect(r.observations.map((o) => o.maxTied)).toEqual([false, true, false]);
   });
 
   it('十亿级高差下两条极小残差不相等时只标红较大者', () => {
@@ -303,12 +291,7 @@ describe('加权最小二乘平差', () => {
     expect(r.observations[0].residual).toBeCloseTo(-0.2 * d, 17);
     expect(r.observations[1].residual).toBeCloseTo(-0.8 * d, 17);
     expect(r.observations[2].residual).toBe(0);
-    const mx = maxAbsResidualDD(r);
-    const tol = residualTieToleranceDD(r);
-    expect(tol).toBeLessThan(1e-20); // 容差 ~8e-22，远小于残差差 6e-16
-    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(false);
-    expect(isTiedMaxResidualDD(r.observations[1].residualDD, mx, tol)).toBe(true);
-    expect(isTiedMaxResidualDD(r.observations[2].residualDD, mx, tol)).toBe(false);
+    expect(r.observations.map((o) => o.maxTied)).toEqual([false, true, false]);
   });
 
   it('十亿级高差下残差“略有差别”时只标出较大者', () => {
@@ -328,10 +311,6 @@ describe('加权最小二乘平差', () => {
     const r = adjust(points, observations);
     expect(r.observations[0].residual).toBeCloseTo(-2e-7, 12);
     expect(r.observations[1].residual).toBeCloseTo(-8e-7, 12);
-    const mx = maxAbsResidualDD(r);
-    const tol = residualTieToleranceDD(r);
-    expect(tol).toBeLessThan(1e-15); // DD 噪声量级远小于真值差 6e-7
-    expect(isTiedMaxResidualDD(r.observations[0].residualDD, mx, tol)).toBe(false);
-    expect(isTiedMaxResidualDD(r.observations[1].residualDD, mx, tol)).toBe(true);
+    expect(r.observations.map((o) => o.maxTied)).toEqual([false, true, false]);
   });
 });

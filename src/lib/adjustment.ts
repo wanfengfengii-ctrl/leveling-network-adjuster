@@ -113,9 +113,30 @@ export function adjust(
       adjustedDh: dd.toNumber(adjustedDhDD),
       residual: dd.toNumber(residualDD),
       residualDD,
+      maxTied: false,
       // 仅在 (v/σ)² 超出 double 范围时钳为 MAX_VALUE，保持有限、不产生 Inf
       weightedSquaredResidual: dd.safeToNumber(weightedDD),
     };
+  });
+
+  // 未舍入最大 |v|
+  let maxIdx = 0;
+  results.forEach((o, i) => {
+    if (dd.cmp(dd.abs(o.residualDD), dd.abs(results[maxIdx].residualDD)) > 0) maxIdx = i;
+  });
+
+  // 并列判定：解经迭代改进，求解误差 O(εdd²)；残差每行仅一次 DD 减法，
+  // 不可分辨误差界取 4·εdd·本行操作数尺度（含输入 DD 表示误差）。
+  // 两行“并列”要求 |v| 之差不超过两行误差界之和——不用全网最大尺度，
+  // 否则基准间长直达观测会把不相干短观测的微小真实差吞掉。
+  const EPS_DD = Math.pow(2, -104);
+  const rowTol = (o: ObservationResult): number =>
+    4 * EPS_DD * Math.max(Math.abs(o.adjustedDh), Math.abs(o.dh));
+  const tolMax = results.length > 0 ? rowTol(results[maxIdx]) : 0;
+  const maxAbs = dd.abs(results[maxIdx]?.residualDD ?? Z);
+  results.forEach((o) => {
+    const diff = dd.toNumber(dd.sub(dd.abs(o.residualDD), maxAbs));
+    o.maxTied = Math.abs(diff) <= rowTol(o) + tolMax;
   });
 
   // 加权残差平方和 Σ(v/σ)²：先除后平方，极端尺度（σ=v=1e-200）下仍精确。
@@ -142,35 +163,4 @@ export function maxAbsResidualDD(result: AdjustmentResult): DD {
     if (dd.cmp(a, mx) > 0) mx = a;
   }
   return mx;
-}
-
-/**
- * 并列容差。解经过迭代改进（见 matrix-dd.solveRefinedDD），求解噪声
- * 与观测数 m 无关，实测在 εdd²≈1e-62 量级；残差本身是一次 DD 减法，
- * 误差不超过数个 εdd·操作数尺度。故取 8·2^-104·max(|平差高差|+|观测高差|)，
- * 不带 m 因子：十亿级高差下约 1.6e-23。
- * 相容网的零残差（噪声 ~1e-54）彼此并列；真实矛盾只要大于该量级即被区分。
- * 操作数为亚正常值（如 5e-324）时尺度为 0，容差为 0，零不与非零并列。
- */
-export function residualTieToleranceDD(result: AdjustmentResult): number {
-  let scale = 0;
-  for (const o of result.observations) {
-    scale = Math.max(scale, Math.abs(o.adjustedDh) + Math.abs(o.dh));
-  }
-  const EPS_DD = Math.pow(2, -104);
-  return 8 * EPS_DD * scale;
-}
-
-/**
- * 是否与最大未舍入残差并列（均为 DD 值）。
- * 最大残差为 0（相容网）时，仅与之精确相符的零残差并列——单条零残差
- * 观测也会被标红；真实非零残差与最大值之差超过容差时不并列。
- */
-export function isTiedMaxResidualDD(residual: DD, maxAbs: DD, tol: number): boolean {
-  if (dd.cmp(maxAbs, Z) === 0) {
-    return dd.cmp(residual, Z) === 0 || dd.cmp(dd.abs(residual), dd.fromNumber(tol)) <= 0;
-  }
-  const diff = dd.toNumber(dd.sub(dd.abs(residual), maxAbs));
-  if (tol === 0) return diff === 0;
-  return Math.abs(diff) <= tol;
 }
