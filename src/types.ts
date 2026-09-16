@@ -1,5 +1,7 @@
 /** 核心数据模型与错误结构 */
 
+import type { DD } from './lib/dd';
+
 /** 点类型：基准点 / 未知点 */
 export type PointType = 'benchmark' | 'unknown';
 
@@ -49,16 +51,24 @@ export type TableError = PointError | ObservationError;
 export interface ParsedPoint {
   name: string;
   type: PointType;
-  /** 仅基准点有高程 */
+  /** 仅基准点有高程（double，兼容旧字段） */
   elevation: number | null;
+  /** 精确高程（double-double），仅基准点有 */
+  elevationDD: DD | null;
 }
 
 /** 归一化后的观测 */
 export interface ParsedObservation {
   from: string;
   end: string;
+  /** 观测高差（double） */
   dh: number;
+  /** 标准差（double） */
   sigma: number;
+  /** 观测高差（double-double，精确读入） */
+  dhDD: DD;
+  /** 标准差（double-double，精确读入） */
+  sigmaDD: DD;
 }
 
 /** 单个观测的平差结果 */
@@ -67,11 +77,13 @@ export interface ObservationResult {
   end: string;
   dh: number;
   sigma: number;
-  /** 平差后高差（两端点平差高程之差） */
+  /** 平差后高差（两端点平差高程之差），展示用 double */
   adjustedDh: number;
-  /** 残差 = 平差高差 − 观测高差 */
+  /** 残差 = 平差高差 − 观测高差，展示用 double */
   residual: number;
-  /** 加权残差平方 v²/σ²（绝对权 1/σ²） */
+  /** 未舍入残差（double-double，用于并列判定） */
+  residualDD: DD;
+  /** 加权残差平方 (v/σ)²（先除后平方） */
   weightedSquaredResidual: number;
 }
 

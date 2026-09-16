@@ -327,6 +327,67 @@ test.describe('隧道复测统一平差工作台', () => {
     await expect(rows.nth(1).locator('.residual-cell')).toHaveText('0.000');
   });
 
+  test('σ 与残差均为 1e-200 时加权残差平方和为 1（先除后平方，内部高精度）', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 2 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click();
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('0');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 2 行高程').fill('1e-200');
+
+    // 观测高差记 0，真实高差 1e-200 → v=1e-200；σ=1e-200 → (v/σ)²=1
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('0');
+    await page.getByLabel('第 1 行标准差').fill('1e-200');
+
+    await expect(page.getByTestId('wss')).toContainText('1.000000');
+    await page.getByTestId('copy-button').click();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text).not.toContain('NaN');
+  });
+
+  test('十亿级高差下两条残差略有差别时只标红较大者', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 3 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click({ clickCount: 3 });
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('0');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('unknown');
+    await page.getByLabel('第 3 行点名称').fill('C');
+    await page.getByLabel('第 3 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 3 行高程').fill('2000000000');
+
+    // 链观测用不同 σ，使两条残差在极小点必然不等（约 -2e-8 与 -8e-8）
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('1000000000');
+    await page.getByLabel('第 1 行标准差').fill('1');
+    await page.getByLabel('第 2 行起点').fill('B');
+    await page.getByLabel('第 2 行终点').fill('C');
+    await page.getByLabel('第 2 行高差').fill('1000000000.0000001');
+    await page.getByLabel('第 2 行标准差').fill('2');
+    await page.getByLabel('第 3 行起点').fill('A');
+    await page.getByLabel('第 3 行终点').fill('C');
+    await page.getByLabel('第 3 行高差').fill('2000000000');
+    await page.getByLabel('第 3 行标准差').fill('1');
+
+    const rows = page.getByTestId('obs-results').locator('tbody tr');
+    await expect(rows).toHaveCount(3);
+    // 两条链残差三位小数都显示 0.000，但未舍入值不同，只有较大（第 2 行）标红
+    await expect(rows.nth(0)).not.toHaveClass(/residual-max/);
+    await expect(rows.nth(1)).toHaveClass(/residual-max/);
+    await expect(rows.nth(0).locator('.residual-cell')).toHaveText('0.000');
+    await expect(rows.nth(1).locator('.residual-cell')).toHaveText('0.000');
+  });
+
   test('拓扑缩放按钮改变视图，复位还原', async ({ page }) => {
     const svg = page.getByTestId('topology-svg');
     const before = await svg.getAttribute('viewBox');

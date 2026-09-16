@@ -4,38 +4,28 @@ import type {
   ParsedObservation,
   ParsedPoint,
 } from '../types';
-import { qrWithColumnPivot, solveRST } from './matrix';
+import * as dd from './dd';
+import type { DD } from './dd';
+import { qrPivotedDD, solveRSTDD } from './matrix-dd';
 
 /**
- * 秩亏主元阈值：|Rkk| ≤ 1e-10 × |R11| 即判定整网秩亏。
- * 无基准支网（含无观测的未知点、观测数不足等）仅由该数值判据识别，
- * 不做任何连通性搜索。
+ * 加权间接平差（自行实现，不调用现成求解器），内部全程 double-double
+ * 高精度算术（约 106 位有效数字）。
+ *
+ * 观测方程：H终 − H起 ≈ h，残差 v = (H终 − H起) − h。
+ * 按点表顺序为未知点建列，基准高程作为已知量移入右端项；权 w=1/σ²。
+ * 求解行权取相对尺度 σmin/σ（公共常数 σmin 不改变极小化解，
+ * 且避免 1/σ 在 σ 极小时溢出）；残差与加权残差平方仍按绝对权
+ * 在 DD 下计算（先除后平方，σ=v=1e-200 时得精确的 1）。
+ *
+ * 使用 DD 的原因：高差接近 1e9 时 double 的 ULP≈1.2e-7，普通 QR 解
+ * 不同减法路径会产生 ~1e-7 噪声，使数学上相等的并列残差出现假差异；
+ * DD 将该噪声压到 1e-23 以下。
  */
+
 const PIVOT_RATIO = 1e-10;
+const Z = dd.zero;
 
-/** 绝对权 1/σ²；σ 小到倒数无法用 double 表示时，钳到最大有限权避免 Inf/NaN。 */
-const MAX_FINITE_WEIGHT = Number.MAX_VALUE;
-function safeWeight(sigma: number): number {
-  if (sigma >= Number.MIN_VALUE) {
-    const inv = 1 / sigma;
-    const w = inv * inv;
-    if (Number.isFinite(w)) return w;
-  }
-  return MAX_FINITE_WEIGHT;
-}
-
-/**
- * 加权间接平差（自行实现，不调用现成求解器）。
- *
- * 观测方程：H终 − H起 ≈ h（观测高差），残差 v = (H终 − H起) − h。
- * 按点表顺序为未知点建列，基准高程作为已知量移入右端项；
- * 权 w = 1/σ²。
- *
- * 求解稳定性：加权目标 Σ(v/σ)² 整体乘以公共常数 σmin² 不改变极小化解，
- * 而 1/σ 在 σ 为合法极小正数（如 1e-200）时会溢出为 Inf 并污染 QR。
- * 故求解时行权取相对尺度 c = σmin/σ ∈ (0,1]；成果（高程、残差）与
- * 报告的加权残差平方和 Σ(v/σ)² 仍按规范的绝对权计算。
- */
 export function adjust(
   points: ParsedPoint[],
   observations: ParsedObservation[],
@@ -51,34 +41,42 @@ export function adjust(
   });
 
   const m = observations.length;
-  // 加权后的设计矩阵与右端项。行权 c = σmin/σ（见文件头说明）。
-  const sigmaMin = m > 0 ? Math.min(...observations.map((o) => o.sigma)) : 1;
-  const A: number[][] = Array.from({ length: m }, () => new Array<number>(u).fill(0));
-  const b = new Array<number>(m).fill(0);
+  // σmin（DD 精确比较）
+  let sigmaMin: DD = Z;
+  observations.forEach((o, i) => {
+    if (i === 0 || dd.cmp(o.sigmaDD, sigmaMin) < 0) sigmaMin = o.sigmaDD;
+  });
+  if (m === 0) sigmaMin = dd.one;
+
+  const A: DD[][] = Array.from({ length: m }, () =>
+    Array.from({ length: u }, () => [0, 0] as DD),
+  );
+  const b: DD[] = Array.from({ length: m }, () => Z);
 
   observations.forEach((o, r) => {
     const fi = pointIndex.get(o.from)!;
     const ei = pointIndex.get(o.end)!;
-    const scale = sigmaMin / o.sigma; // 相对行权 ∈ (0,1]，等价于 1/σ 且不会溢出
-    b[r] = o.dh * scale;
+    const scale = dd.div(sigmaMin, o.sigmaDD);
+    b[r] = dd.mul(o.dhDD, scale);
     if (unknownColumns[ei] >= 0) A[r][unknownColumns[ei]] = scale;
-    else b[r] -= (points[ei].elevation as number) * scale; // +H终（基准）移到右端
-    if (unknownColumns[fi] >= 0) A[r][unknownColumns[fi]] = -scale;
-    else b[r] += (points[fi].elevation as number) * scale; // −H起（基准）移到右端
+    else b[r] = dd.sub(b[r], dd.mul(points[ei].elevationDD!, scale));
+    if (unknownColumns[fi] >= 0) A[r][unknownColumns[fi]] = dd.negate(scale);
+    else b[r] = dd.add(b[r], dd.mul(points[fi].elevationDD!, scale));
   });
 
-  const elevations = points.map((p) => p.elevation as number);
+  // 高程（DD）：基准为已知值，未知待解
+  const elevDD: DD[] = points.map((p) => (p.elevationDD ? [p.elevationDD[0], p.elevationDD[1]] : Z));
 
-  // 未知量为空（全部为基准点）：不建方程求解，直接复算残差。
   if (u > 0) {
-    const { R, Q, perm } = qrWithColumnPivot(A);
+    const qr = qrPivotedDD(A);
+    const { R, perm } = qr;
 
-    // 秩亏判据（唯一判据）：逐主元与 R11 比较，含 n>m 的零主元。
-    // R 列未做物理交换，第 k 个主元位于 R[k][perm[k]]。
-    const r11 = m > 0 ? Math.abs(R[0][perm[0]]) : 0;
+    // 秩亏判据（唯一判据），在 DD 下比较：|Rkk| ≤ 1e-10·|R11|。
+    const r11 = m > 0 ? dd.abs(R[0][perm[0]]) : Z;
     for (let k = 0; k < u; k++) {
-      const rkk = k < m ? Math.abs(R[k][perm[k]]) : 0;
-      if (rkk <= PIVOT_RATIO * r11) {
+      const rkk = k < m ? dd.abs(R[k][perm[k]]) : Z;
+      const rhs = dd.mul(dd.fromNumber(PIVOT_RATIO), r11);
+      if (dd.cmp(rkk, rhs) <= 0) {
         return {
           elevations: [],
           observations: [],
@@ -86,77 +84,82 @@ export function adjust(
           unknownCount: u,
           rankDeficient: true,
           reason:
-            `整网秩亏：第 ${k + 1} 个主元 |R${k + 1}${k + 1}| = ${rkk.toExponential(3)} ` +
-            `不大于 1e-10 × |R11|（|R11| = ${r11.toExponential(3)}）。` +
+            `整网秩亏：第 ${k + 1} 个主元 |R${k + 1}${k + 1}| = ${dd.toNumber(rkk).toExponential(3)} ` +
+            `不大于 1e-10 × |R11|（|R11| = ${dd.toNumber(r11).toExponential(3)}）。` +
             `存在未获得基准控制的无基准支网（或观测数不足），请将该支网通过观测连接到基准点。`,
         };
       }
     }
 
-    const x = solveRST(R, Q, perm, b); // 内部已按列置换还原
+    const x = solveRSTDD(qr, b);
     points.forEach((p, i) => {
-      if (p.type === 'unknown') elevations[i] = x[unknownColumns[i]];
+      if (p.type === 'unknown') elevDD[i] = x[unknownColumns[i]];
     });
   }
 
-  // 由同一批未舍入高程复算每个观测的平差高差与残差。
-  // 加权残差平方按规范的绝对权 1/σ² 计算；safeWeight 仅在 σ 小到
-  // double 无法表达其倒数时钳到最大有限权，避免溢出为 Inf/NaN。
+  // 同一批未舍入 DD 高程复算残差（DD），展示值转回 double。
   const results: ObservationResult[] = observations.map((o) => {
     const fi = pointIndex.get(o.from)!;
     const ei = pointIndex.get(o.end)!;
-    const adjustedDh = elevations[ei] - elevations[fi];
-    const residual = adjustedDh - o.dh;
-    const w = safeWeight(o.sigma);
+    const adjustedDhDD = dd.sub(elevDD[ei], elevDD[fi]);
+    const residualDD = dd.sub(adjustedDhDD, o.dhDD);
+    const q = dd.div(residualDD, o.sigmaDD); // v/σ（先除，避免极端尺度下溢）
+    const weightedDD = dd.mul(q, q);
     return {
       from: o.from,
       end: o.end,
       dh: o.dh,
       sigma: o.sigma,
-      adjustedDh,
-      residual,
-      weightedSquaredResidual: w * residual * residual,
+      adjustedDh: dd.toNumber(adjustedDhDD),
+      residual: dd.toNumber(residualDD),
+      residualDD,
+      // 仅在 (v/σ)² 超出 double 范围时钳为 MAX_VALUE，保持有限、不产生 Inf
+      weightedSquaredResidual: dd.safeToNumber(weightedDD),
     };
   });
 
-  const weightedSumOfSquares = results.reduce(
-    (s, r) => s + r.weightedSquaredResidual,
-    0,
-  );
+  // 加权残差平方和 Σ(v/σ)²：先除后平方，极端尺度（σ=v=1e-200）下仍精确。
+  let wssDD: DD = Z;
+  observations.forEach((o, i) => {
+    const q = dd.div(results[i].residualDD, o.sigmaDD);
+    wssDD = dd.add(wssDD, dd.mul(q, q));
+  });
 
   return {
-    elevations,
+    elevations: elevDD.map((v) => dd.toNumber(v)),
     observations: results,
-    weightedSumOfSquares,
+    weightedSumOfSquares: dd.safeToNumber(wssDD),
     unknownCount: u,
     rankDeficient: false,
   };
 }
 
-/** 未舍入绝对残差最大值；并列者由调用方按容差一并标红。 */
-export function maxAbsResidual(result: AdjustmentResult): number {
-  return result.observations.reduce((mx, r) => Math.max(mx, Math.abs(r.residual)), 0);
+/** 未舍入（DD）绝对残差最大值。 */
+export function maxAbsResidualDD(result: AdjustmentResult): DD {
+  let mx: DD = Z;
+  for (const o of result.observations) {
+    const a = dd.abs(o.residualDD);
+    if (dd.cmp(a, mx) > 0) mx = a;
+  }
+  return mx;
 }
 
 /**
- * 并列判定容差：残差由“平差高差 − 观测高差”相减得到，其舍入噪声量级
- * 取决于参与运算的操作数（高程、观测高差）而非残差自身（相消时残差可极小）。
- * 故取全网 max(|平差高差| + |观测高差|) 的数个 ULP；
- * 操作数本身就是亚正常值（如 5e-324）时容差同比极小，零不会被误判并列。
+ * 并列容差：DD 下求解/相减噪声为 O(εdd·操作数量级)，εdd≈2^-104。
+ * 取 64 个该单位；操作数为亚正常值时容差下溢为 0，零不与极小非零并列。
  */
-export function residualTieTolerance(result: AdjustmentResult): number {
+export function residualTieToleranceDD(result: AdjustmentResult): number {
   let scale = 0;
   for (const o of result.observations) {
     scale = Math.max(scale, Math.abs(o.adjustedDh) + Math.abs(o.dh));
   }
-  return 8 * Number.EPSILON * scale;
+  const EPS_DD = Math.pow(2, -104);
+  return 64 * EPS_DD * scale;
 }
 
-/**
- * 判定某残差是否与最大绝对残差并列（均用未舍入值比较）。
- * 最大残差为 0 时仅真正的 0 并列；否则容差取求解/相减舍入噪声量级。
- */
-export function isTiedMaxResidual(residual: number, maxAbs: number, tol: number): boolean {
-  if (maxAbs === 0) return residual === 0;
-  return Math.abs(Math.abs(residual) - maxAbs) <= tol;
+/** 是否与最大未舍入残差并列（均为 DD 值）。 */
+export function isTiedMaxResidualDD(residual: DD, maxAbs: DD, tol: number): boolean {
+  const diff = dd.toNumber(dd.sub(dd.abs(residual), maxAbs));
+  if (tol === 0) return diff === 0;
+  return Math.abs(diff) <= tol;
 }

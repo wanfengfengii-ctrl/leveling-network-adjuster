@@ -5,14 +5,7 @@ import type {
   PointRow,
   TableError,
 } from '../types';
-
-/** 严格解析有限数：空串/空白由调用方先行拦截；NaN、Infinity 一律非法。 */
-export function parseFinite(raw: string): number | null {
-  const s = raw.trim();
-  if (s === '') return null;
-  const v = Number(s);
-  return Number.isFinite(v) ? v : null;
-}
+import { parseDecimal, toNumber as ddToNumber } from './dd';
 
 const POINT_FIELD_ORDER = ['name', 'type', 'elevation'] as const;
 const OBS_FIELD_ORDER = ['from', 'end', 'row', 'dh', 'sigma'] as const;
@@ -55,21 +48,25 @@ export function validateAll(
     }
 
     let elevation: number | null = null;
+    let elevationDD: ParsedPoint['elevationDD'] = null;
     const elevRaw = r.elevation.trim();
     if (type === 'benchmark') {
       if (elevRaw === '') {
         pushPoint(row, 'elevation', '基准点必须填写高程');
       } else {
-        const v = parseFinite(elevRaw);
-        if (v === null) pushPoint(row, 'elevation', '基准点高程必须是有限数值');
-        else elevation = v;
+        const vDD = parseDecimal(elevRaw);
+        if (vDD === null) pushPoint(row, 'elevation', '基准点高程必须是有限数值');
+        else {
+          elevationDD = vDD;
+          elevation = ddToNumber(vDD);
+        }
       }
     } else if (type === 'unknown' && elevRaw !== '') {
       // 未知点填了任何内容都不允许（即便内容不是合法数值）。
       pushPoint(row, 'elevation', '未知点不得填写高程');
     }
 
-    parsedPoints.push(name !== '' && type !== null ? { name, type, elevation } : null);
+    parsedPoints.push(name !== '' && type !== null ? { name, type, elevation, elevationDD } : null);
   });
 
   // ---- 观测表 ----
@@ -99,31 +96,38 @@ export function validateAll(
     }
 
     let dh: number | null = null;
+    let dhDD: ParsedObservation['dhDD'] | null = null;
     if (r.dh.trim() === '') pushObs(row, 'dh', '高差不能为空');
     else {
-      const v = parseFinite(r.dh);
-      if (v === null) pushObs(row, 'dh', '高差必须是有限数值');
-      else dh = v;
+      const vDD = parseDecimal(r.dh);
+      if (vDD === null) pushObs(row, 'dh', '高差必须是有限数值');
+      else {
+        dhDD = vDD;
+        dh = ddToNumber(vDD);
+      }
     }
 
     let sigma: number | null = null;
+    let sigmaDD: ParsedObservation['sigmaDD'] | null = null;
     if (r.sigma.trim() === '') {
       pushObs(row, 'sigma', '标准差不能为空');
     } else {
-      const v = parseFinite(r.sigma);
-      if (v === null) {
+      const vDD = parseDecimal(r.sigma);
+      const v = vDD === null ? NaN : ddToNumber(vDD);
+      if (vDD === null || !Number.isFinite(v)) {
         pushObs(row, 'sigma', '标准差必须是数值');
       } else if (!(v > 0 && v <= 100)) {
         pushObs(row, 'sigma', '标准差必须在开区间 (0, 100] 内');
       } else {
         sigma = v;
+        sigmaDD = vDD;
       }
     }
 
     parsedObs.push(
       from !== '' && end !== '' && knownNames.has(from) && knownNames.has(end) &&
         from !== end && dh !== null && sigma !== null
-        ? { from, end, dh, sigma }
+        ? { from, end, dh, sigma, dhDD: dhDD!, sigmaDD: sigmaDD! }
         : null,
     );
   });

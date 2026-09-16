@@ -1,7 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { AdjustmentResult, ParsedObservation, ParsedPoint } from '../types';
 import { formatFixed3 } from '../lib/format';
-import { isTiedMaxResidual, maxAbsResidual, residualTieTolerance } from '../lib/adjustment';
+import {
+  isTiedMaxResidualDD,
+  maxAbsResidualDD,
+  residualTieToleranceDD,
+} from '../lib/adjustment';
 import { layoutGraph } from '../lib/layout';
 
 interface Props {
@@ -16,8 +20,8 @@ const R = 0.22; // 节点绘制半径（布局坐标单位）
 export function Topology({ points, observations, result }: Props) {
   const [zoom, setZoom] = useState(1);
   const nodes = useMemo(() => layoutGraph(points, observations), [points, observations]);
-  const maxRes = useMemo(() => maxAbsResidual(result), [result]);
-  const tieTol = useMemo(() => residualTieTolerance(result), [result]);
+  const maxRes = useMemo(() => maxAbsResidualDD(result), [result]);
+  const tieTol = useMemo(() => residualTieToleranceDD(result), [result]);
 
   if (nodes.length === 0) {
     return <p className="empty-hint">点表为空，暂无可显示的拓扑。</p>;
@@ -105,7 +109,7 @@ export function Topology({ points, observations, result }: Props) {
           const sy = a.y + uy * R;
           const tx = b.x - ux * R;
           const ty = b.y - uy * R;
-          const tie = isTiedMaxResidual(o.residual, maxRes, tieTol);
+          const tie = isTiedMaxResidualDD(o.residualDD, maxRes, tieTol);
           return (
             <g key={k}>
               <line

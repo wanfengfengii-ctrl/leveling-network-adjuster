@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
 import type { AdjustmentResult, ParsedObservation, ParsedPoint } from '../types';
 import { formatFixed3 } from '../lib/format';
-import { isTiedMaxResidual, maxAbsResidual, residualTieTolerance } from '../lib/adjustment';
+import * as dd from '../lib/dd';
+import {
+  isTiedMaxResidualDD,
+  maxAbsResidualDD,
+  residualTieToleranceDD,
+} from '../lib/adjustment';
 import { Topology } from './Topology';
 
 interface Props {
@@ -12,8 +17,8 @@ interface Props {
 
 /** 平差成果：点高程、观测残差（并列最大未舍入绝对残差标红）、加权残差平方和与拓扑。 */
 export function Results({ points, observations, result }: Props) {
-  const maxRes = useMemo(() => maxAbsResidual(result), [result]);
-  const tieTol = useMemo(() => residualTieTolerance(result), [result]);
+  const maxRes = useMemo(() => maxAbsResidualDD(result), [result]);
+  const tieTol = useMemo(() => residualTieToleranceDD(result), [result]);
 
   return (
     <div className="results">
@@ -50,7 +55,7 @@ export function Results({ points, observations, result }: Props) {
         <div className="card-head">
           <h2>观测残差</h2>
           <span className="stat">
-            v = 平差高差 − 观测高差；最大 |v| = {formatFixed3(maxRes)}（未舍入判定，红色标出）
+            v = 平差高差 − 观测高差；最大 |v| = {formatFixed3(dd.toNumber(maxRes))}（未舍入判定，红色标出）
           </span>
         </div>
         <div className="table-scroll">
@@ -68,7 +73,7 @@ export function Results({ points, observations, result }: Props) {
             </thead>
             <tbody>
               {result.observations.map((o, i) => {
-                const tie = isTiedMaxResidual(o.residual, maxRes, tieTol);
+                const tie = isTiedMaxResidualDD(o.residualDD, maxRes, tieTol);
                 return (
                   <tr key={i} className={tie ? 'residual-max' : ''}>
                     <td className="row-no">{i + 1}</td>
@@ -86,7 +91,11 @@ export function Results({ points, observations, result }: Props) {
         </div>
         <p className="wss" data-testid="wss">
           加权残差平方和 Σ(v/σ)² ={' '}
-          <strong>{result.weightedSumOfSquares.toFixed(6)}</strong>
+          <strong>
+            {Math.abs(result.weightedSumOfSquares) >= 1e12
+              ? result.weightedSumOfSquares.toExponential(6)
+              : result.weightedSumOfSquares.toFixed(6)}
+          </strong>
           <span className="note">（由未舍入结果计算）</span>
         </p>
       </section>
