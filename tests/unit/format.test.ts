@@ -19,6 +19,17 @@ describe('formatFixed3 恰半远离零', () => {
     expect(formatFixed3(0.0025)).toBe('0.003'); // 奇数末位也远离零
   });
 
+  it('尾数接近但未达到半位时不得进位', () => {
+    expect(formatFixed3(0.0024999)).toBe('0.002');
+    expect(formatFixed3(0.00249)).toBe('0.002');
+    expect(formatFixed3(1.23449)).toBe('1.234');
+    expect(formatFixed3(1.2344999)).toBe('1.234');
+    expect(formatFixed3(100.00049)).toBe('100.000');
+    expect(formatFixed3(-0.0024999)).toBe('-0.002');
+    // 与恰半值仅差 1e-9 的真小数不得被恰半容差吞掉
+    expect(formatFixed3(0.0025 - 1e-9)).toBe('0.002');
+  });
+
   it('负零显示为 0.000', () => {
     expect(formatFixed3(-0)).toBe('0.000');
     expect(formatFixed3(-1e-17)).toBe('0.000');

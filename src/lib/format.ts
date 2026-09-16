@@ -2,9 +2,10 @@
  * 三位小数格式化：恰半一律远离零（half away from zero）。
  * 例如 0.0025 → 0.003（银行家舍入会给 0.002）、-1.2345 → -1.235。
  *
- * 二进制浮点下 1.2345 实际存为 1.2344999999999998…，直接 Math.round 会误舍；
- * 这里显式检测“小数部分与 0.5 的距离在双精度舍入容差内”即视为恰半并进位，
- * 真正小于半（差距远超容差）的值不受影响。
+ * 十进制恰半值在二进制下可能存成略小于半的数（如 1.2345 的 ×1000
+ * 为 1234.4999999999998），直接 Math.round 会误舍。故显式检测
+ * “小数部分与 0.5 的差距不超过该尺度下的双精度舍入量级（约半 ULP）”，
+ * 命中即按恰半进位；真正未到半位的值距 0.5 远大于此容差，绝不受影响。
  */
 export function formatFixed3(x: number): string {
   if (!Number.isFinite(x)) return String(x);
@@ -14,9 +15,10 @@ export function formatFixed3(x: number): string {
   let rounded: number;
   const floor = Math.floor(scaled);
   const frac = scaled - floor;
-  const tol = 1e-10 * Math.max(1, scaled);
-  if (Math.abs(frac - 0.5) <= tol) {
-    rounded = floor + 1; // 恰半：绝对值方向进位（远离零）
+  // 双精度 ULP 约为 2^-52·scaled ≈ 2.3e-16·scaled，2e-12 在此量级内。
+  const tol = 2e-12 * Math.max(1, scaled);
+  if (frac < 0.5 && 0.5 - frac <= tol) {
+    rounded = floor + 1; // 本为恰半、被二进制拉低：绝对值方向进位（远离零）
   } else {
     rounded = Math.round(scaled);
   }

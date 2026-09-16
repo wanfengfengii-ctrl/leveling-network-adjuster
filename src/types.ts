@@ -71,7 +71,7 @@ export interface ObservationResult {
   adjustedDh: number;
   /** 残差 = 平差高差 − 观测高差 */
   residual: number;
-  /** 加权残差平方 (v/σ)² */
+  /** 加权残差平方 w·v²，相对权 w=(σmin/σ)²（与 1/σ² 仅差公共常数 σmin²） */
   weightedSquaredResidual: number;
 }
 

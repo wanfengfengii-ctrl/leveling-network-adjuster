@@ -48,6 +48,8 @@ function buildAndSolveNormal(
   obsRows: ObservationRow[],
 ): { elevations: number[]; wss: number } {
   const { points, observations } = validateAll(pointRows, obsRows);
+  // 与实现一致的相对权尺度 w=(σmin/σ)²，避免极小 σ 溢出，且与 1/σ² 只差公共常数
+  const sigmaMin = Math.min(...observations.map((o) => o.sigma));
   const unknownIdx = points
     .map((p, i) => (p.type === 'unknown' ? i : -1))
     .filter((i) => i >= 0);
@@ -81,7 +83,8 @@ function buildAndSolveNormal(
     const fi = points.findIndex((p) => p.name === o.from);
     const ei = points.findIndex((p) => p.name === o.end);
     const v = elevations[ei] - elevations[fi] - o.dh;
-    wss += (v / o.sigma) ** 2;
+    const wRel = (sigmaMin / o.sigma) ** 2;
+    wss += wRel * v * v;
   }
   return { elevations, wss };
 }

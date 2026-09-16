@@ -84,9 +84,11 @@ export function Results({ points, observations, result }: Props) {
           </table>
         </div>
         <p className="wss" data-testid="wss">
-          加权残差平方和 Σ(v/σ)² ={' '}
+          加权残差平方和 Σ w·v² ={' '}
           <strong>{result.weightedSumOfSquares.toFixed(6)}</strong>
-          <span className="note">（由未舍入结果计算）</span>
+          <span className="note">
+            （w=(σmin/σ)²，由未舍入结果计算；与 w=1/σ² 仅差公共常数 σmin²，不改变平差解）
+          </span>
         </p>
       </section>
 

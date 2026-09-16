@@ -18,7 +18,10 @@ const PIVOT_RATIO = 1e-10;
  *
  * 观测方程：H终 − H起 ≈ h（观测高差），残差 v = (H终 − H起) − h。
  * 按点表顺序为未知点建列，基准高程作为已知量移入右端项；
- * 权 w = 1/σ²，实现时对每行乘以 1/σ 后做带列主元 QR。
+ * 权 w = 1/σ²。加权目标 Σ(v/σ)² 乘以任意公共常数不改变极小化解，
+ * 故行权不取 1/σ（σ 极小时会溢出为 Inf 进而产生 NaN），
+ * 而取相对尺度 c = σmin/σ ∈ (0,1]（σmin 为全网最小标准差），
+ * 再做带列主元 QR。
  */
 export function adjust(
   points: ParsedPoint[],
@@ -35,14 +38,15 @@ export function adjust(
   });
 
   const m = observations.length;
-  // 加权后的设计矩阵与右端项。
+  // 加权后的设计矩阵与右端项。行权 c = σmin/σ（见文件头说明）。
+  const sigmaMin = m > 0 ? Math.min(...observations.map((o) => o.sigma)) : 1;
   const A: number[][] = Array.from({ length: m }, () => new Array<number>(u).fill(0));
   const b = new Array<number>(m).fill(0);
 
   observations.forEach((o, r) => {
     const fi = pointIndex.get(o.from)!;
     const ei = pointIndex.get(o.end)!;
-    const scale = 1 / o.sigma; // 行权 √w = 1/σ
+    const scale = sigmaMin / o.sigma; // 相对行权 ∈ (0,1]，等价于 1/σ 且不会溢出
     b[r] = o.dh * scale;
     if (unknownColumns[ei] >= 0) A[r][unknownColumns[ei]] = scale;
     else b[r] -= (points[ei].elevation as number) * scale; // +H终（基准）移到右端
@@ -83,11 +87,14 @@ export function adjust(
   }
 
   // 由同一批未舍入高程复算每个观测的平差高差与残差。
+  // 加权残差平方用与求解一致的相对权 w=(σmin/σ)²：与 1/σ² 仅差公共常数 σmin²，
+  // 不改变极小化解，却保证任意合法的极小 σ 下结果仍为有限值。
   const results: ObservationResult[] = observations.map((o) => {
     const fi = pointIndex.get(o.from)!;
     const ei = pointIndex.get(o.end)!;
     const adjustedDh = elevations[ei] - elevations[fi];
     const residual = adjustedDh - o.dh;
+    const w = (sigmaMin / o.sigma) ** 2;
     return {
       from: o.from,
       end: o.end,
@@ -95,7 +102,7 @@ export function adjust(
       sigma: o.sigma,
       adjustedDh,
       residual,
-      weightedSquaredResidual: (residual / o.sigma) ** 2,
+      weightedSquaredResidual: w * residual * residual,
     };
   });
 
@@ -118,7 +125,13 @@ export function maxAbsResidual(result: AdjustmentResult): number {
   return result.observations.reduce((mx, r) => Math.max(mx, Math.abs(r.residual)), 0);
 }
 
+/**
+ * 判定某残差是否与最大绝对残差并列（均用未舍入值比较）。
+ * 容差随双精度机器精度与残差自身量级缩放，下限为 O(ε)：
+ * 这样残差为 0 与 1e-15 时不会被误判并列，而真正按位相等
+ * （或仅差舍入噪声）的并列仍被识别。
+ */
 export function isTiedMaxResidual(residual: number, maxAbs: number): boolean {
-  if (maxAbs === 0) return Math.abs(residual) === 0;
-  return Math.abs(Math.abs(residual) - maxAbs) <= 1e-12 * Math.max(1, Math.abs(maxAbs));
+  const tol = 2 * Number.EPSILON * Math.max(1, maxAbs);
+  return Math.abs(Math.abs(residual) - maxAbs) <= tol;
 }

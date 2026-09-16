@@ -128,11 +128,48 @@ describe('加权最小二乘平差', () => {
     expect(r.reason).toMatch(/R\d\d/);
   });
 
-  it('最大绝对残差并列判定', () => {
+  it('极小合法标准差仍给出有限成果（行权不得溢出为 Inf/NaN）', () => {
+    seq = 0;
+    const { errors, points, observations } = validateAll(
+      [point('A', 'benchmark', '100'), point('B', 'unknown'), point('C', 'unknown')],
+      [
+        obs('A', 'B', '1.5', '1e-200'),
+        obs('B', 'C', '2.5', '2e-200'),
+        obs('A', 'C', '4.0000000001', '3e-200'),
+      ],
+    );
+    expect(errors).toHaveLength(0);
+    const r = adjust(points, observations);
+    expect(r.rankDeficient).toBe(false);
+    for (const h of r.elevations) expect(Number.isFinite(h)).toBe(true);
+    expect(r.elevations[1]).toBeCloseTo(101.5, 8);
+    for (const o of r.observations) {
+      expect(Number.isFinite(o.residual)).toBe(true);
+      expect(Number.isFinite(o.adjustedDh)).toBe(true);
+      expect(Number.isFinite(o.weightedSquaredResidual)).toBe(true);
+    }
+    expect(Number.isFinite(r.weightedSumOfSquares)).toBe(true);
+  });
+
+  it('标准差为最小正双精度也不产生 NaN', () => {
+    seq = 0;
+    const { points, observations } = validateAll(
+      [point('A', 'benchmark', '0'), point('B', 'unknown')],
+      [obs('A', 'B', '1', Number.MIN_VALUE.toString())],
+    );
+    const r = adjust(points, observations);
+    expect(r.rankDeficient).toBe(false);
+    expect(Number.isFinite(r.elevations[1])).toBe(true);
+  });
+
+  it('最大绝对残差并列判定：零与极小非零不得并列', () => {
     expect(isTiedMaxResidual(0.002, 0.002)).toBe(true);
     expect(isTiedMaxResidual(-0.002, 0.002)).toBe(true);
     expect(isTiedMaxResidual(0.001, 0.002)).toBe(false);
     expect(isTiedMaxResidual(0, 0)).toBe(true);
+    // 一条残差恰为 0、另一条为极小非零：只应标出非零的最大残差
+    expect(isTiedMaxResidual(0, 1e-15)).toBe(false);
+    expect(isTiedMaxResidual(1e-15, 1e-15)).toBe(true);
     expect(maxAbsResidual({
       elevations: [],
       observations: [

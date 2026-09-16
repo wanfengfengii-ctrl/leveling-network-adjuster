@@ -169,6 +169,82 @@ test.describe('隧道复测统一平差工作台', () => {
     await expect(page.getByTestId('copy-button')).toBeEnabled();
   });
 
+  test('极小合法标准差（1e-200）仍给出有限成果，不得出现 NaN', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 3 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click({ clickCount: 3 });
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('100');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('unknown');
+    await page.getByLabel('第 3 行点名称').fill('C');
+    await page.getByLabel('第 3 行点类型').selectOption('unknown');
+
+    const obsData: [string, string, string, string][] = [
+      ['A', 'B', '1.5', '1e-200'],
+      ['B', 'C', '2.5', '2e-200'],
+      ['A', 'C', '4.0000000001', '3e-200'],
+    ];
+    for (let i = 0; i < 3; i++) {
+      await page.getByLabel(`第 ${i + 1} 行起点`).fill(obsData[i][0]);
+      await page.getByLabel(`第 ${i + 1} 行终点`).fill(obsData[i][1]);
+      await page.getByLabel(`第 ${i + 1} 行高差`).fill(obsData[i][2]);
+      await page.getByLabel(`第 ${i + 1} 行标准差`).fill(obsData[i][3]);
+    }
+
+    await expect(page.getByTestId('point-results')).toBeVisible();
+    const body = page.locator('body');
+    await expect(body).not.toContainText('NaN');
+    const pointRows = page.getByTestId('point-results').locator('tbody tr');
+    await expect(pointRows.nth(1)).toContainText('101.500');
+    // 复制内容同样不得含 NaN
+    await page.getByTestId('copy-button').click();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text).not.toContain('NaN');
+    expect(text.split('\n')[1]).toBe('B,101.500');
+  });
+
+  test('残差为零与极小非零（未舍入显示同为 0.000）时只标红非零最大者', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 3 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click({ clickCount: 3 });
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('0');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('unknown');
+    await page.getByLabel('第 3 行点名称').fill('C');
+    await page.getByLabel('第 3 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 3 行高程').fill('2');
+
+    // A→B=1、B→C=1 严格相容（B=1，两条残差恰为零）；
+    // A→C=2.0000000001 带来约 1e-10 的唯一非零最大残差，三位小数显示 0.000
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('1');
+    await page.getByLabel('第 1 行标准差').fill('1');
+    await page.getByLabel('第 2 行起点').fill('B');
+    await page.getByLabel('第 2 行终点').fill('C');
+    await page.getByLabel('第 2 行高差').fill('1');
+    await page.getByLabel('第 2 行标准差').fill('1');
+    await page.getByLabel('第 3 行起点').fill('A');
+    await page.getByLabel('第 3 行终点').fill('C');
+    await page.getByLabel('第 3 行高差').fill('2.0000000001');
+    await page.getByLabel('第 3 行标准差').fill('1');
+
+    const maxRows = page.getByTestId('obs-results').locator('tbody tr.residual-max');
+    await expect(maxRows).toHaveCount(1);
+    // 唯一标红行是第 3 行，尽管其显示残差四舍五入为 0.000
+    await expect(maxRows.nth(0)).toContainText('A');
+    await expect(maxRows.nth(0).locator('.residual-cell')).toHaveText('0.000');
+    const allRows = page.getByTestId('obs-results').locator('tbody tr');
+    await expect(allRows.nth(0)).not.toHaveClass(/residual-max/);
+    await expect(allRows.nth(1)).not.toHaveClass(/residual-max/);
+  });
+
   test('拓扑缩放按钮改变视图，复位还原', async ({ page }) => {
     const svg = page.getByTestId('topology-svg');
     const before = await svg.getAttribute('viewBox');
