@@ -245,6 +245,88 @@ test.describe('隧道复测统一平差工作台', () => {
     await expect(allRows.nth(1)).not.toHaveClass(/residual-max/);
   });
 
+  test('加权残差平方和按绝对权 1/σ²：σ=2、v=0.1 显示 0.002500', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 2 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click();
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('0');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 2 行高程').fill('0.3');
+
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('0.2');
+    await page.getByLabel('第 1 行标准差').fill('2');
+
+    await expect(page.getByTestId('wss')).toContainText('0.002500');
+    await expect(
+      page.getByTestId('obs-results').locator('.residual-cell'),
+    ).toHaveText('0.100');
+  });
+
+  test('高程 1000000000.0001 未到半位，页面与复制均为 1000000000.000', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 2 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click();
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('1000000000.0001');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('unknown');
+
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('0.5');
+    await page.getByLabel('第 1 行标准差').fill('1');
+
+    const pointRows = page.getByTestId('point-results').locator('tbody tr');
+    await expect(pointRows.nth(0).locator('.num')).toHaveText('1000000000.000');
+
+    await page.getByTestId('copy-button').click();
+    const text = await page.evaluate(() => navigator.clipboard.readText());
+    expect(text.split('\n')[0]).toBe('A,1000000000.000');
+
+    // 恰半值仍进位
+    await page.getByLabel('第 1 行高程').fill('1000000000.0005');
+    await expect(pointRows.nth(0).locator('.num')).toHaveText('1000000000.001');
+  });
+
+  test('残差 0 与 5e-324（显示同为 0.000）只标红非零观测', async ({ page }) => {
+    await page.getByRole('button', { name: '清空全部' }).click();
+    await page.getByRole('button', { name: '＋ 空点行' }).click({ clickCount: 2 });
+    await page.getByRole('button', { name: '＋ 空观测行' }).click({ clickCount: 2 });
+
+    await page.getByLabel('第 1 行点名称').fill('A');
+    await page.getByLabel('第 1 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 1 行高程').fill('0');
+    await page.getByLabel('第 2 行点名称').fill('B');
+    await page.getByLabel('第 2 行点类型').selectOption('benchmark');
+    await page.getByLabel('第 2 行高程').fill('5e-324');
+
+    // 观测 1：与高差严格相容，残差 0；观测 2：高差记 0，残差 5e-324
+    await page.getByLabel('第 1 行起点').fill('A');
+    await page.getByLabel('第 1 行终点').fill('B');
+    await page.getByLabel('第 1 行高差').fill('5e-324');
+    await page.getByLabel('第 1 行标准差').fill('1');
+    await page.getByLabel('第 2 行起点').fill('A');
+    await page.getByLabel('第 2 行终点').fill('B');
+    await page.getByLabel('第 2 行高差').fill('0');
+    await page.getByLabel('第 2 行标准差').fill('1');
+
+    const rows = page.getByTestId('obs-results').locator('tbody tr');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).not.toHaveClass(/residual-max/);
+    await expect(rows.nth(1)).toHaveClass(/residual-max/);
+    // 两条显示文本都是 0.000，标红仅由未舍入值决定
+    await expect(rows.nth(0).locator('.residual-cell')).toHaveText('0.000');
+    await expect(rows.nth(1).locator('.residual-cell')).toHaveText('0.000');
+  });
+
   test('拓扑缩放按钮改变视图，复位还原', async ({ page }) => {
     const svg = page.getByTestId('topology-svg');
     const before = await svg.getAttribute('viewBox');

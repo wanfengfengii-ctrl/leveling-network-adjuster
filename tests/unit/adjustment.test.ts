@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjust, isTiedMaxResidual, maxAbsResidual } from '../../src/lib/adjustment';
+import { adjust, isTiedMaxResidual, maxAbsResidual, residualTieTolerance } from '../../src/lib/adjustment';
 import { validateAll } from '../../src/lib/validation';
 import type { ObservationRow, PointRow } from '../../src/types';
 
@@ -105,7 +105,35 @@ describe('加权最小二乘平差', () => {
     expect(r.rankDeficient).toBe(false);
     expect(r.unknownCount).toBe(0);
     expect(r.observations[0].residual).toBeCloseTo(0.1, 12);
-    expect(r.weightedSumOfSquares).toBeCloseTo(0.01, 12);
+    expect(r.weightedSumOfSquares).toBeCloseTo(0.01, 12); // (0.1/1)²
+  });
+
+  it('加权残差平方和按绝对权 1/σ²：σ=2、v=0.1 时为 0.0025', () => {
+    seq = 0;
+    const { points, observations } = validateAll(
+      [point('A', 'benchmark', '0'), point('B', 'benchmark', '0.3')],
+      [obs('A', 'B', '0.2', '2')],
+    );
+    const r = adjust(points, observations);
+    expect(r.observations[0].residual).toBeCloseTo(0.1, 12);
+    expect(r.weightedSumOfSquares).toBeCloseTo(0.0025, 14); // (0.1/2)²
+    expect(r.observations[0].weightedSquaredResidual).toBeCloseTo(0.0025, 14);
+  });
+
+  it('5e-324 与零残差不得并列，仅非零者标红', () => {
+    seq = 0;
+    const { points, observations } = validateAll(
+      [point('A', 'benchmark', '0'), point('B', 'benchmark', '5e-324')],
+      [obs('A', 'B', '5e-324', '1'), obs('A', 'B', '0', '1')],
+    );
+    const r = adjust(points, observations);
+    expect(r.observations[0].residual).toBe(0);
+    expect(r.observations[1].residual).toBe(5e-324);
+    const mx = maxAbsResidual(r);
+    expect(mx).toBe(5e-324);
+    const tol = residualTieTolerance(r);
+    expect(isTiedMaxResidual(0, mx, tol)).toBe(false);
+    expect(isTiedMaxResidual(5e-324, mx, tol)).toBe(true);
   });
 
   it('观测少于未知量也判秩亏', () => {
@@ -163,13 +191,19 @@ describe('加权最小二乘平差', () => {
   });
 
   it('最大绝对残差并列判定：零与极小非零不得并列', () => {
-    expect(isTiedMaxResidual(0.002, 0.002)).toBe(true);
-    expect(isTiedMaxResidual(-0.002, 0.002)).toBe(true);
-    expect(isTiedMaxResidual(0.001, 0.002)).toBe(false);
-    expect(isTiedMaxResidual(0, 0)).toBe(true);
-    // 一条残差恰为 0、另一条为极小非零：只应标出非零的最大残差
-    expect(isTiedMaxResidual(0, 1e-15)).toBe(false);
-    expect(isTiedMaxResidual(1e-15, 1e-15)).toBe(true);
+    // 容差按参与减法的操作数量级给定：常规量级下容许数个 ULP 的路径噪声
+    const tolNormal = 8 * Number.EPSILON * 2;
+    expect(isTiedMaxResidual(0.002, 0.002, tolNormal)).toBe(true);
+    expect(isTiedMaxResidual(-0.002, 0.002, tolNormal)).toBe(true);
+    expect(isTiedMaxResidual(0.001, 0.002, tolNormal)).toBe(false);
+    expect(isTiedMaxResidual(0, 0, 0)).toBe(true);
+    // 一条残差恰为 0、另一条为极小非零：容差随操作数量级（同为 1e-15）缩小，不得并列
+    const tolTiny = 8 * Number.EPSILON * 1e-15;
+    expect(isTiedMaxResidual(0, 1e-15, tolTiny)).toBe(false);
+    expect(isTiedMaxResidual(1e-15, 1e-15, tolTiny)).toBe(true);
+    // 5e-324（最小正 subnormal）场景：容差下溢为 0，零不与它并列
+    expect(isTiedMaxResidual(0, 5e-324, 8 * Number.EPSILON * 5e-324)).toBe(false);
+    expect(isTiedMaxResidual(5e-324, 5e-324, 8 * Number.EPSILON * 5e-324)).toBe(true);
     expect(maxAbsResidual({
       elevations: [],
       observations: [

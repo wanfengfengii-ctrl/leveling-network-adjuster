@@ -30,6 +30,16 @@ describe('formatFixed3 恰半远离零', () => {
     expect(formatFixed3(0.0025 - 1e-9)).toBe('0.002');
   });
 
+  it('大数量级下容差仍只覆盖 ULP 量级，不得误进位', () => {
+    // 1000000000.0001 距 .0005 半位有 0.0004（约 3.4 个 ULP(x)），必须舍去
+    expect(formatFixed3(1000000000.0001)).toBe('1000000000.000');
+    expect(formatFixed3(1000000000.0004)).toBe('1000000000.000');
+    // 恰半仍远离零进位（误差在数个 ULP 内容差内）
+    expect(formatFixed3(1000000000.0005)).toBe('1000000000.001');
+    // 负数对称
+    expect(formatFixed3(-1000000000.0004)).toBe('-1000000000.000');
+  });
+
   it('负零显示为 0.000', () => {
     expect(formatFixed3(-0)).toBe('0.000');
     expect(formatFixed3(-1e-17)).toBe('0.000');

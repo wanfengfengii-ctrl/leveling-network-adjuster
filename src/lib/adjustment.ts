@@ -13,15 +13,28 @@ import { qrWithColumnPivot, solveRST } from './matrix';
  */
 const PIVOT_RATIO = 1e-10;
 
+/** 绝对权 1/σ²；σ 小到倒数无法用 double 表示时，钳到最大有限权避免 Inf/NaN。 */
+const MAX_FINITE_WEIGHT = Number.MAX_VALUE;
+function safeWeight(sigma: number): number {
+  if (sigma >= Number.MIN_VALUE) {
+    const inv = 1 / sigma;
+    const w = inv * inv;
+    if (Number.isFinite(w)) return w;
+  }
+  return MAX_FINITE_WEIGHT;
+}
+
 /**
  * 加权间接平差（自行实现，不调用现成求解器）。
  *
  * 观测方程：H终 − H起 ≈ h（观测高差），残差 v = (H终 − H起) − h。
  * 按点表顺序为未知点建列，基准高程作为已知量移入右端项；
- * 权 w = 1/σ²。加权目标 Σ(v/σ)² 乘以任意公共常数不改变极小化解，
- * 故行权不取 1/σ（σ 极小时会溢出为 Inf 进而产生 NaN），
- * 而取相对尺度 c = σmin/σ ∈ (0,1]（σmin 为全网最小标准差），
- * 再做带列主元 QR。
+ * 权 w = 1/σ²。
+ *
+ * 求解稳定性：加权目标 Σ(v/σ)² 整体乘以公共常数 σmin² 不改变极小化解，
+ * 而 1/σ 在 σ 为合法极小正数（如 1e-200）时会溢出为 Inf 并污染 QR。
+ * 故求解时行权取相对尺度 c = σmin/σ ∈ (0,1]；成果（高程、残差）与
+ * 报告的加权残差平方和 Σ(v/σ)² 仍按规范的绝对权计算。
  */
 export function adjust(
   points: ParsedPoint[],
@@ -87,14 +100,14 @@ export function adjust(
   }
 
   // 由同一批未舍入高程复算每个观测的平差高差与残差。
-  // 加权残差平方用与求解一致的相对权 w=(σmin/σ)²：与 1/σ² 仅差公共常数 σmin²，
-  // 不改变极小化解，却保证任意合法的极小 σ 下结果仍为有限值。
+  // 加权残差平方按规范的绝对权 1/σ² 计算；safeWeight 仅在 σ 小到
+  // double 无法表达其倒数时钳到最大有限权，避免溢出为 Inf/NaN。
   const results: ObservationResult[] = observations.map((o) => {
     const fi = pointIndex.get(o.from)!;
     const ei = pointIndex.get(o.end)!;
     const adjustedDh = elevations[ei] - elevations[fi];
     const residual = adjustedDh - o.dh;
-    const w = (sigmaMin / o.sigma) ** 2;
+    const w = safeWeight(o.sigma);
     return {
       from: o.from,
       end: o.end,
@@ -126,12 +139,24 @@ export function maxAbsResidual(result: AdjustmentResult): number {
 }
 
 /**
- * 判定某残差是否与最大绝对残差并列（均用未舍入值比较）。
- * 容差随双精度机器精度与残差自身量级缩放，下限为 O(ε)：
- * 这样残差为 0 与 1e-15 时不会被误判并列，而真正按位相等
- * （或仅差舍入噪声）的并列仍被识别。
+ * 并列判定容差：残差由“平差高差 − 观测高差”相减得到，其舍入噪声量级
+ * 取决于参与运算的操作数（高程、观测高差）而非残差自身（相消时残差可极小）。
+ * 故取全网 max(|平差高差| + |观测高差|) 的数个 ULP；
+ * 操作数本身就是亚正常值（如 5e-324）时容差同比极小，零不会被误判并列。
  */
-export function isTiedMaxResidual(residual: number, maxAbs: number): boolean {
-  const tol = 2 * Number.EPSILON * Math.max(1, maxAbs);
+export function residualTieTolerance(result: AdjustmentResult): number {
+  let scale = 0;
+  for (const o of result.observations) {
+    scale = Math.max(scale, Math.abs(o.adjustedDh) + Math.abs(o.dh));
+  }
+  return 8 * Number.EPSILON * scale;
+}
+
+/**
+ * 判定某残差是否与最大绝对残差并列（均用未舍入值比较）。
+ * 最大残差为 0 时仅真正的 0 并列；否则容差取求解/相减舍入噪声量级。
+ */
+export function isTiedMaxResidual(residual: number, maxAbs: number, tol: number): boolean {
+  if (maxAbs === 0) return residual === 0;
   return Math.abs(Math.abs(residual) - maxAbs) <= tol;
 }

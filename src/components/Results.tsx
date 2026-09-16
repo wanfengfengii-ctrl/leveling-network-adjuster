@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { AdjustmentResult, ParsedObservation, ParsedPoint } from '../types';
 import { formatFixed3 } from '../lib/format';
-import { isTiedMaxResidual, maxAbsResidual } from '../lib/adjustment';
+import { isTiedMaxResidual, maxAbsResidual, residualTieTolerance } from '../lib/adjustment';
 import { Topology } from './Topology';
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
 /** 平差成果：点高程、观测残差（并列最大未舍入绝对残差标红）、加权残差平方和与拓扑。 */
 export function Results({ points, observations, result }: Props) {
   const maxRes = useMemo(() => maxAbsResidual(result), [result]);
+  const tieTol = useMemo(() => residualTieTolerance(result), [result]);
 
   return (
     <div className="results">
@@ -67,7 +68,7 @@ export function Results({ points, observations, result }: Props) {
             </thead>
             <tbody>
               {result.observations.map((o, i) => {
-                const tie = isTiedMaxResidual(o.residual, maxRes);
+                const tie = isTiedMaxResidual(o.residual, maxRes, tieTol);
                 return (
                   <tr key={i} className={tie ? 'residual-max' : ''}>
                     <td className="row-no">{i + 1}</td>
@@ -84,11 +85,9 @@ export function Results({ points, observations, result }: Props) {
           </table>
         </div>
         <p className="wss" data-testid="wss">
-          加权残差平方和 Σ w·v² ={' '}
+          加权残差平方和 Σ(v/σ)² ={' '}
           <strong>{result.weightedSumOfSquares.toFixed(6)}</strong>
-          <span className="note">
-            （w=(σmin/σ)²，由未舍入结果计算；与 w=1/σ² 仅差公共常数 σmin²，不改变平差解）
-          </span>
+          <span className="note">（由未舍入结果计算）</span>
         </p>
       </section>
 
