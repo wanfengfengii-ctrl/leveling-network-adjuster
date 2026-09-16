@@ -1,0 +1,20 @@
+services:
+  # 静态页面：宿主端口由 WEB_PORT 覆盖，默认 8080
+  web:
+    build:
+      context: .
+      target: web
+    image: tunnel-adjustment-workbench:web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+
+  # 校验服务：依次运行 Vitest 单元测试、生产构建、Playwright E2E
+  verify:
+    build:
+      context: .
+      target: verify
+    image: tunnel-adjustment-workbench:verify
+    environment:
+      - CI=true
+    command: sh -c "npm run test && npm run build && npx playwright test"

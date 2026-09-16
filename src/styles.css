@@ -1,0 +1,411 @@
+:root {
+  --bg: #f4f6f9;
+  --card: #ffffff;
+  --ink: #1f2933;
+  --muted: #697586;
+  --line: #d9dee5;
+  --primary: #2b6cb0;
+  --primary-dark: #1e4e7e;
+  --danger: #d62828;
+  --danger-bg: #fdecec;
+  --warn-bg: #fff6e0;
+  --warn-border: #e0a800;
+  --benchmark: #7b3f00;
+  --benchmark-fill: #ffe0b2;
+  --unknown-fill: #d7e9fb;
+  --unknown-stroke: #2b6cb0;
+  --edge: #577590;
+  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+}
+
+.app-header h1 {
+  margin: 8px 0 4px;
+  font-size: 24px;
+}
+
+.subtitle {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+
+.toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px 12px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: #eef3f9;
+  border-color: var(--primary);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-copy {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-copy:hover:not(:disabled) {
+  background: var(--primary-dark);
+}
+
+.btn-add {
+  color: var(--primary);
+  border-color: #bcd4ec;
+  font-size: 13px;
+}
+
+.btn-del {
+  color: var(--danger);
+  border-color: #f0c4c4;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .tables {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(31, 41, 51, 0.05);
+}
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.card-head h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.stat {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table.grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+table.grid th,
+table.grid td {
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+table.grid th {
+  background: #f0f3f7;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.col-row {
+  width: 40px;
+  text-align: center !important;
+}
+
+.col-op {
+  width: 64px;
+}
+
+.row-no {
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+input,
+select {
+  font: inherit;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+  width: 100%;
+  min-width: 70px;
+  border-radius: 4px;
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: #fff;
+}
+
+input.invalid,
+select.invalid {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+tr.row-error {
+  background: #fef7f7;
+}
+
+/* 错误汇总 */
+.error-panel {
+  border-color: var(--danger);
+}
+
+.error-panel h2 {
+  color: var(--danger);
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.error-list {
+  margin: 8px 0 0;
+  padding-left: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.error-list li {
+  padding: 5px 8px;
+  border-radius: 5px;
+  margin-bottom: 3px;
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.error-list li.err-point {
+  background: #f3f7fc;
+}
+
+.error-list li.err-obs {
+  background: #fdf5f5;
+}
+
+.err-loc {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.err-field {
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.err-msg {
+  color: var(--danger);
+}
+
+/* 空状态 */
+.empty-panel h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+/* 秩亏面板 */
+.rank-panel {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.rank-panel h2 {
+  margin: 0 0 8px;
+  color: #8a5b00;
+}
+
+.rank-reason {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+/* 成果 */
+.result-grid .residual-max {
+  background: var(--danger-bg);
+}
+
+.residual-max .residual-cell,
+.edge-label-max {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.wss {
+  margin: 10px 0 2px;
+  font-size: 14px;
+}
+
+.wss .note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+/* 拓扑 */
+.topology-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.zoom-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.zoom-bar button {
+  padding: 2px 10px;
+  min-width: 40px;
+}
+
+.zoom-value {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.topology-svg {
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle, #e8edf3 1px, transparent 1px) 0 0 / 20px 20px,
+    #fbfcfe;
+}
+
+.edge {
+  stroke: var(--edge);
+  stroke-width: 0.03;
+}
+
+.edge-max {
+  stroke: var(--danger);
+  stroke-width: 0.05;
+}
+
+.edge-label {
+  font-size: 0.16px;
+  fill: var(--edge);
+  font-family: ui-monospace, Consolas, monospace;
+  paint-order: stroke;
+  stroke: #fbfcfe;
+  stroke-width: 0.05px;
+}
+
+.edge-label-max {
+  font-size: 0.18px;
+  paint-order: stroke;
+  stroke: #fdecec;
+  stroke-width: 0.05px;
+}
+
+.node {
+  stroke-width: 0.03;
+}
+
+.node-benchmark {
+  fill: var(--benchmark-fill);
+  stroke: var(--benchmark);
+}
+
+.node-unknown {
+  fill: var(--unknown-fill);
+  stroke: var(--unknown-stroke);
+}
+
+.node-label {
+  font-size: 0.18px;
+  fill: var(--ink);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: #fbfcfe;
+  stroke-width: 0.06px;
+}
+
+.empty-hint {
+  color: var(--muted);
+}
+
+.app-footer {
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
